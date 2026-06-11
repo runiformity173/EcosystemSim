@@ -1,491 +1,274 @@
-const HEX_SIZE = 5; // Change this
+const BIOMES = [
+  { name: 'Deep Ocean',    color: '#0a2342' },
+  { name: 'Shallow Water', color: '#1565a8' },
+  { name: 'Beach',         color: '#c9a655' },
+  { name: 'Grassland',     color: '#5a9e5a' },
+  { name: 'Forest',        color: '#2d6e3f' },
+  { name: 'Dense Forest',  color: '#1b4332' },
+  { name: 'Desert',        color: '#c7922a' },
+  { name: 'Tundra',        color: '#8ba5b3' },
+  { name: 'Wetland',       color: '#3d5a44' },
+  { name: 'Mountain',      color: '#6b6b6b' },
+];
 
-const STORAGE_KEY = "hex-land-map";
+const HEX_SIZE  = 5;
+const GRID_COLS = 169;
+const GRID_ROWS = 117;
+const ZOOM_MAX = 16;
+const ZOOM_MIN = 0.12;
+const CELL_ZOOM_MIN = 4;
 
-let isPainting = false;
-let paintValue = false;
-let paintedThisStroke = new Set();
-
-
-/*
-===========================================================
-SETUP
-===========================================================
-*/
-
-const map = document.getElementById("map");
-const canvas = document.getElementById("hexCanvas");
-const ctx = canvas.getContext("2d");
-
-const exportBox = document.getElementById("exportBox");
-const countDisplay = document.getElementById("count");
-
-let grid = [];
-let rows = 0;
-let cols = 0;
-
-/*
-===========================================================
-HEX MATH
-===========================================================
-*/
-
-const SQRT3 = Math.sqrt(3);
-
-function hexCenter(col, row) {
-
-    const x =
-        HEX_SIZE * SQRT3 * (col + 0.5 * (row & 1));
-
-    const y =
-        HEX_SIZE * 1.5 * row;
-
-    return { x, y };
+// pointy-top hex: col/row → pixel center
+function hexToPixel(col, row, size) {
+  const x = size * Math.sqrt(3) * (col + 0.5 * (row & 1));
+  const y = size * 1.5 * row;
+  return [x, y];
 }
 
-function drawHex(x, y) {
+// draw one pointy-top hex path (no fill/stroke — caller decides)
+function hexPath(ctx, cx, cy, size) {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (Math.PI / 3) * i - Math.PI / 6;
+    const x = cx + size * Math.cos(a);
+    const y = cy + size * Math.sin(a);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
 
-    ctx.beginPath();
-
-    for (let i = 0; i < 6; i++) {
-
-        const angle =
-            (Math.PI / 180) * (60 * i - 30);
-
-        const px =
-            x + HEX_SIZE * Math.cos(angle);
-
-        const py =
-            y + HEX_SIZE * Math.sin(angle);
-
-        if (i === 0)
-            ctx.moveTo(px, py);
-        else
-            ctx.lineTo(px, py);
+function buildGrid() {
+  const cells= [];
+  for (let r = 0; r < GRID_ROWS; r++) {
+    cells[r] = [];
+    for (let c = 0; c < GRID_COLS; c++) {
+      cells[r][c] = new Cell(DEFAULT_LAND[r][c]);
     }
-
-    ctx.closePath();
+  }
+  return cells;
 }
 
-function pointInHex(mx, my, cx, cy) {
+const canvas = document.getElementById("sim-canvas");
+const ctx    = canvas.getContext('2d');
 
-    return (
-        Math.hypot(mx - cx, my - cy)
-        < HEX_SIZE
-    );
+const cells = buildGrid();
+
+let ox = 0, oy = 0, scale = 1;
+let dragging = false, dragX = 0, dragY = 0, baseOx = 0, baseOy = 0;
+let lastTouchDist = 0;
+
+function computeGridOrigin() {
+    const [maxX] = hexToPixel(GRID_COLS - 1, GRID_ROWS - 2, HEX_SIZE);
+    const [, maxY] = hexToPixel(GRID_COLS - 1, GRID_ROWS - 1, HEX_SIZE);
+    return [maxX / 2, maxY / 2];
 }
+function worldToHex(wx, wy) {
+    // Fractional axial for pointy-top orientation
+    const q = (Math.sqrt(3) / 3 * wx - wy / 3) / HEX_SIZE;
+    const r = (2 / 3 * wy) / HEX_SIZE;
 
-/*
-===========================================================
-GRID STORAGE
-===========================================================
-*/
+    // Cube round
+    let cx = q, cz = r, cy = -cx - cz;
+    let rx = Math.round(cx), ry = Math.round(cy), rz = Math.round(cz);
+    const dx = Math.abs(rx - cx), dy = Math.abs(ry - cy), dz = Math.abs(rz - cz);
+    if      (dx > dy && dx > dz) rx = -ry - rz;
+    else if (dy > dz)            ry = -rx - rz;
+    else                         rz = -rx - ry;
 
-function saveGrid() {
-    return;
-    localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify(grid)
-    );
+    // Axial (rx, rz) → odd-r offset
+    const row = rz;
+    const col = rx + Math.floor(rz / 2);
+
+    if (col < 0 || col >= GRID_COLS || row < 0 || row >= GRID_ROWS) return null;
+    return { col, row };
 }
-
-function loadGrid() {
-
-    const stored =
-        localStorage.getItem(STORAGE_KEY);
-
-    if (stored) {
-        grid = JSON.parse(stored);
-    }
+function screenToHex(sx, sy) {
+    return worldToHex(...screenToWorld(sx, sy));
 }
-
-/*
-===========================================================
-DRAWING
-===========================================================
-*/
 
 function draw() {
+    canvas.width  = canvas.offsetWidth  || canvas.clientWidth;
+    canvas.height = canvas.offsetHeight || canvas.clientHeight;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    ctx.clearRect(
-        0,
-        0,
-        canvas.width,
-        canvas.height
-    );
+    const [gox, goy] = computeGridOrigin();
 
-    let landCount = 0;
-
-    for (let row = 0; row < rows; row++) {
-
-        for (let col = 0; col < cols; col++) {
-
-            const center =
-                hexCenter(col, row);
-
-            drawHex(center.x, center.y);
-
-            if (grid[row][col]) {
-
-                landCount++;
-
-                ctx.fillStyle =
-                    "rgba(0,255,0,0.35)";
-
-                ctx.fill();
-            }
-
-            ctx.strokeStyle =
-                "rgba(255,255,255,0.35)";
-
-            ctx.lineWidth = 1;
+    ctx.save();
+    ctx.translate(canvas.width / 2 + ox, canvas.height / 2 + oy);
+    ctx.scale(scale, scale);
+    ctx.translate(-gox, -goy);
+    for (let r = 0; r < GRID_ROWS; r++) {
+        for (let c = 0; c < GRID_COLS; c++) {
+            const [px, py] = hexToPixel(c, r, HEX_SIZE);
+            const cell = cells[r][c];
+            hexPath(ctx, px, py, HEX_SIZE);
+            ctx.fillStyle = cell.isLand ? "green" : "blue";
+            ctx.fill();
+            ctx.strokeStyle = (scale >= CELL_ZOOM_MIN) ? 'rgba(0,0,0,0.3)' : ctx.fillStyle;
+            ctx.lineWidth = (2 / scale);
             ctx.stroke();
+
+            // if (cell.animals > 0) {
+            // const rad = Math.min(1.8 + cell.animals * 0.5, HEX_SIZE * 0.32);
+            // ctx.beginPath();
+            // ctx.arc(px, py, rad, 0, Math.PI * 2);
+            // ctx.fillStyle = 'rgba(255,255,255,0.88)';
+            // ctx.fill();
+            // }
         }
     }
-
-    countDisplay.textContent =
-        `Land Hexes: ${landCount}`;
+    ctx.restore();
+    updateZoom();
 }
 
-/*
-===========================================================
-INITIALIZE
-===========================================================
-*/
+function updateZoom() {
+    const el = document.getElementById('zoom-pct');
+    if (el) el.textContent = Math.round(scale * 100) + '%';
+}
 
-function initializeGrid() {
+// ── ResizeObserver ────────────────────────────────────────────────────────
+const ro = new ResizeObserver(draw);
+ro.observe(canvas);
 
-    canvas.width = map.clientWidth;
-    canvas.height = map.clientHeight;
-
-    cols =
-        Math.ceil(
-            canvas.width /
-            (HEX_SIZE * SQRT3)
-        ) + 2;
-
-    rows =
-        Math.ceil(
-            canvas.height /
-            (HEX_SIZE * 1.5)
-        ) + 2;
-
-    if (
-        grid.length !== rows
-    ) {
-
-        grid = [];
-
-        for (
-            let row = 0;
-            row < rows;
-            row++
-        ) {
-
-            const arr = [];
-
-            for (
-                let col = 0;
-                col < cols;
-                col++
-            ) {
-                arr.push(false);
-            }
-
-            grid.push(arr);
-        }
-
-        loadGrid();
-
-        if (
-            grid.length !== rows
-        ) {
-
-            grid = [];
-
-            for (
-                let row = 0;
-                row < rows;
-                row++
-            ) {
-
-                const arr = [];
-
-                for (
-                    let col = 0;
-                    col < cols;
-                    col++
-                ) {
-                    arr.push(false);
-                }
-
-                grid.push(arr);
-            }
-        }
-    }
-
+// ── Mouse pan ─────────────────────────────────────────────────────────────
+canvas.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    dragging = true;
+    dragX = e.clientX; dragY = e.clientY;
+    baseOx = ox; baseOy = oy;
+});
+window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    ox = baseOx + (e.clientX - dragX);
+    oy = baseOy + (e.clientY - dragY);
     draw();
-}
+});
+window.addEventListener('mouseup', () => { dragging = false; });
 
-/*
-===========================================================
-CLICK HANDLING
-===========================================================
-*/
-function getHexAt(mx, my) {
+// coordinate display on hover
+canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const el = document.getElementById('coord-badge');
+    if (el) el.textContent = `x: ${Math.round((mx - canvas.width/2 - ox) / scale)}  y: ${Math.round((my - canvas.height/2 - oy) / scale)}`;
+});
 
-    let bestRow = -1;
-    let bestCol = -1;
-    let bestDist = Infinity;
-
-    for (let row = 0; row < rows; row++) {
-
-        for (let col = 0; col < cols; col++) {
-
-            const center = hexCenter(col, row);
-
-            const dist = Math.hypot(
-                mx - center.x,
-                my - center.y
-            );
-
-            if (dist < bestDist) {
-
-                bestDist = dist;
-                bestRow = row;
-                bestCol = col;
-            }
-        }
-    }
-
-    return {
-        row: bestRow,
-        col: bestCol
-    };
-}
-function getNeighbors(
-    row,
-    col
-) {
-
-    const evenRow =
-        row % 2 === 0;
-
-    if (evenRow) {
-
-        return [
-            [row, col - 1],
-            [row, col + 1],
-
-            [row - 1, col - 1],
-            [row - 1, col],
-
-            [row + 1, col - 1],
-            [row + 1, col]
-        ];
-    }
-
-    return [
-        [row, col - 1],
-        [row, col + 1],
-
-        [row - 1, col],
-        [row - 1, col + 1],
-
-        [row + 1, col],
-        [row + 1, col + 1]
-    ];
-}
-function floodFill(startRow, startCol) {
-
-    const targetValue =
-        grid[startRow][startCol];
-
-    const replacementValue =
-        !targetValue;
-
-    if (targetValue === replacementValue)
-        return;
-
-    const queue = [
-        [startRow, startCol]
-    ];
-
-    const visited = new Set();
-
-    while (queue.length > 0) {
-
-        const [row, col] =
-            queue.pop();
-
-        const key =
-            `${row},${col}`;
-
-        if (visited.has(key))
-            continue;
-
-        visited.add(key);
-
-        if (
-            row < 0 ||
-            row >= rows ||
-            col < 0 ||
-            col >= cols
-        ) {
-            continue;
-        }
-
-        if (
-            grid[row][col]
-            !== targetValue
-        ) {
-            continue;
-        }
-
-        grid[row][col] =
-            replacementValue;
-
-        const neighbors =
-            getNeighbors(
-                row,
-                col
-            );
-
-        for (const neighbor
-            of neighbors) {
-
-            queue.push(
-                neighbor
-            );
-        }
-    }
-
-    // saveGrid();
+// ── Wheel zoom ────────────────────────────────────────────────────────────
+canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.08 : 1/1.08;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    // zoom toward cursor
+    const oldScale = scale;
+    scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale * factor));
+    ox = mx - canvas.width / 2 + (ox - (mx - canvas.width / 2)) * scale / oldScale;
+    oy = my - canvas.height / 2 + (oy - (my - canvas.height / 2)) * scale / oldScale;
     draw();
-}
-function paintHex(row, col) {
+}, { passive: false });
 
-    if (row < 0 || col < 0) return;
-
-    const key = `${row},${col}`;
-
-    if (paintedThisStroke.has(key))
-        return;
-
-    paintedThisStroke.add(key);
-
-    grid[row][col] = paintValue;
-}
-canvas.addEventListener("mousedown", (event) => {
-
-    const rect =
-        canvas.getBoundingClientRect();
-
-    const mx =
-        event.clientX - rect.left;
-
-    const my =
-        event.clientY - rect.top;
-
-    const hex =
-        getHexAt(mx, my);
-
-    if (hex.row < 0) return;
-
-
-    if (event.shiftKey) {
-        if (!confirm("are you sure you want to flood fill?")) return;
-        floodFill(
-            hex.row,
-            hex.col
-        );
-
-        return;
-    }
-    isPainting = true;
-
-    paintedThisStroke.clear();
-
-    paintValue =
-        !grid[hex.row][hex.col];
-
-    paintHex(
-        hex.row,
-        hex.col
+// ── Touch ─────────────────────────────────────────────────────────────────
+canvas.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+    dragging = true;
+    dragX = e.touches[0].clientX; dragY = e.touches[0].clientY;
+    baseOx = ox; baseOy = oy;
+    } else if (e.touches.length === 2) {
+    lastTouchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
     );
-
-    saveGrid();
+    }
+}, { passive: true });
+canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (e.touches.length === 1 && dragging) {
+    ox = baseOx + (e.touches[0].clientX - dragX);
+    oy = baseOy + (e.touches[0].clientY - dragY);
     draw();
-});
-
-canvas.addEventListener("mousemove", (event) => {
-
-    if (!isPainting) return;
-
-    const rect =
-        canvas.getBoundingClientRect();
-
-    const mx =
-        event.clientX - rect.left;
-
-    const my =
-        event.clientY - rect.top;
-
-    const hex =
-        getHexAt(mx, my);
-
-    paintHex(
-        hex.row,
-        hex.col
+    } else if (e.touches.length === 2) {
+    const d = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
     );
+    scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale * (d / lastTouchDist)));
+    lastTouchDist = d;
+    draw();
+    }
+}, { passive: false });
+canvas.addEventListener('touchend', () => { dragging = false; });
 
-    saveGrid();
+// ── Overlay buttons ───────────────────────────────────────────────────────
+document.getElementById('btn-zoom-in')?.addEventListener('click', () => {
+    const rect = canvas.getBoundingClientRect();
+    const oldScale = scale;
+    scale = Math.min(ZOOM_MAX, scale * 1.25);
+    ox = ox/oldScale*scale
+    oy = oy/oldScale*scale
     draw();
 });
-window.addEventListener("mouseup", () => {
-
-    if (!isPainting)
-        return;
-
-    isPainting = false;
-
-    saveGrid();
+document.getElementById('btn-zoom-out')?.addEventListener('click', () => {
+    const rect = canvas.getBoundingClientRect();
+    const oldScale = scale;
+    scale = Math.max(ZOOM_MIN, scale / 1.25);
+    ox = ox/oldScale*scale
+    oy = oy/oldScale*scale
+    draw();
 });
-/*
-===========================================================
-EXPORT
-===========================================================
-*/
+document.getElementById('btn-reset-view')?.addEventListener('click', () => {
+    ox = 0; oy = 0; scale = 1; draw();
+});
 
-document
-.getElementById("exportBtn")
-.addEventListener(
-    "click",
-    () => {
-
-        exportBox.style.display =
-            "block";
-
-        exportBox.value =
-            JSON.stringify(
-                grid,
-                null,
-                2
-            );
-
-        navigator.clipboard
-            .writeText(
-                exportBox.value
-            );
+// ── Simulation control stubs ──────────────────────────────────────────────
+let simRunning = false;
+const playBtn = document.getElementById('btn-play');
+playBtn?.addEventListener('click', () => {
+    simRunning = !simRunning;
+    if (playBtn) {
+    if (simRunning) {
+        playBtn.className = 'tb-btn pause-btn';
+        playBtn.innerHTML = '<i class="bi bi-pause-fill"></i> Pause';
+    } else {
+        playBtn.className = 'tb-btn play-btn';
+        playBtn.innerHTML = '<i class="bi bi-play-fill"></i> Play';
     }
-);
-
-document
-.getElementById("hideExportBtn")
-.addEventListener(
-    "click",
-    () => {
-        exportBox.style.display =
-            "none";
     }
-);
+    // hook: window.onSimPlay(running: boolean)
+    (window).onSimPlay(simRunning);
+});
+
+document.getElementById('btn-step')?.addEventListener('click', () => {
+    // hook: window.onSimStep()
+    (window).onSimStep?.();
+});
+
+document.getElementById('speed-select')?.addEventListener('change', function(o) {
+    // hook: window.onSimSpeed(multiplier: number)
+    (window).onSimSpeed(Number(o.value));
+});
+
+// ── Public API (user simulation code hooks in here) ───────────────────────
+window.EcosimUI = {
+    /** Force-redraw the hex canvas. Call after mutating cells. */
+    redraw: draw,
+    /** The live 2-D cell array [col][row] — mutate in place. */
+    cells,
+    /** Biome metadata array. */
+    BIOMES,
+    /** Current view transform */
+    getViewState: () => ({ ox, oy, scale }),
+    /** Update the step counter badge in the toolbar. */
+    setStep: (n) => {
+    const el = document.getElementById('step-count');
+    if (el) el.textContent = String(n);
+    },
+    /** Update population count badge. */
+    setPopulation: (n) => {
+    const el = document.getElementById('pop-count');
+    if (el) el.textContent = String(n);
+    },
+};
+
+draw();

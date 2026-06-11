@@ -1,4 +1,4 @@
-[
+const DEFAULT_LAND = [
   [
     false,
     false,
