@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <title>Ecosystem Sim | Runiformity's Websites</title>
+    <meta name="description" content="A configurable ecosystem simulator">
+    <meta name="author" content="runiformity173">
+    <link href="/bootstrap.css" rel="stylesheet" type="text/css" />
+    <link href="style.css" rel="stylesheet" type="text/css" />
+    <link rel="icon" type="image/x-icon" href="/images/favicon.ico">
+</head>
+
+<body>
+    <div id="ecosim-root">
+
+        <div id="sim-toolbar">
+
+            <span class="sim-brand">
+                <span class="sim-brand-dot"></span>
+                EcoSim
+            </span>
+
+            <div class="toolbar-sep">
+
+                <button id="btn-play" class="tb-btn play-btn">
+                    <i class="bi bi-play-fill"> Play
+                </button>
+                <button id="btn-step" class="tb-btn" title="Advance one step">
+                    <i class="bi bi-skip-end-fill"></i> Step
+                </button>
+
+                <div class="toolbar-sep"></div>
+
+                <span class="sim-stat">Speed</span>
+                <select id="speed-select" class="tb-select" defaultValue="1">
+                    <option value="0.25">¼×</option>
+                    <option value="0.5">½×</option>
+                    <option value="1">1×</option>
+                    <option value="2">2×</option>
+                    <option value="5">5×</option>
+                    <option value="10">10×</option>
+                </select>
+
+                <div class="toolbar-sep"></div>
+
+                <span class="sim-stat">
+                    Step&nbsp;<strong id="step-count">0</strong>
+                </span>
+
+                <span class="sim-stat">
+                    Pop&nbsp;<strong id="pop-count">—</strong>
+                </span>
+
+                <div style="flex: 1"></div>
+
+                <button class="panel-btn" data-bs-toggle="offcanvas" data-bs-target="#panel-stats"
+                    title="Statistics">
+                    <i class="bi bi-bar-chart-fill"></i>
+                    Stats
+                </button>
+                <button class="panel-btn" data-bs-toggle="offcanvas" data-bs-target="#panel-animals"
+                    title="Animal preferences">
+                    <i class="bi bi-bug-fill"></i>
+                    Animals
+                </button>
+                <button class="panel-btn" data-bs-toggle="offcanvas" data-bs-target="#panel-biomes"
+                    title="Biome editor">
+                    <i class="bi bi-globe2"></i>
+                    Biomes
+                </button>
+                <button class="panel-btn" data-bs-toggle="offcanvas" data-bs-target="#panel-settings"
+                    title="Settings">
+                    <i class="bi bi-gear-fill"></i>
+                    Settings
+                </button>
+            </div>
+
+            <div id="sim-canvas-wrap">
+                <canvas id="sim-canvas"></canvas>
+
+                <div id="overlay-tl" class="canvas-overlay">
+                    <div
+                        style="background: rgba(22,27,34,0.82); border: 1px solid #30363d; border-radius: 8px; padding: 8px 10px; backdrop-filter: blur(4px); font-size: 11px; color: #6e7681;">
+                        <div
+                            style="font-weight: 600; color: #8b949e; margin-bottom: 5px; font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase;">
+                            Biomes</div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3px 12px;">
+                            <!-- {BIOMES.map(b => (
+                <div key={b.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 2, background: b.color, flexShrink: 0, display: 'inline-block' }}></i>
+                  <span>{b.name}</span>
+                </div>
+              ))} -->
+                        </div>
+                    </div>
+                </div>
+
+                <div id="overlay-br" class="canvas-overlay">
+                    <span class="zoom-badge"><b id="zoom-pct">100%</b></span>
+                    <button id="btn-zoom-out" class="map-btn" title="Zoom out"><i
+                            class="bi bi-dash"></i></button>
+                    <button id="btn-zoom-in" class="map-btn" title="Zoom in"><i class="bi bi-plus"></i></button>
+                    <button id="btn-reset-view" class="map-btn" title="Reset view"><i
+                            class="bi bi-fullscreen"></i></button>
+                </div>
+
+                <div id="overlay-bl" class="canvas-overlay">
+                    <span id="coord-badge"></span>
+                </div>
+            </div>
+
+            <div id="panel-stats" class="offcanvas offcanvas-end sim-panel" tabIndex=-1
+                aria-labelledby="panel-stats-title">
+                <div class="offcanvas-header">
+                    <h5 class="offcanvas-title" id="panel-stats-title">
+                        <i class="bi bi-bar-chart-fill" style="color: #58a6ff"></i>
+                        Statistics
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></i>
+                </div>
+                <div class="offcanvas-body">
+
+                    <div class="panel-section-title">Population overview</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px;">
+                        <div class="stat-card">
+                            <span class="stat-card-label">Total animals</span>
+                            <span class="stat-card-value" id="stat-total-animals">—</span>
+                            <span class="stat-card-sub">↑ placeholder</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-card-label">Species</span>
+                            <span class="stat-card-value" id="stat-species">—</span>
+                            <span class="stat-card-sub">placeholder</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-card-label">Births (step)</span>
+                            <span class="stat-card-value" id="stat-births">—</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-card-label">Deaths (step)</span>
+                            <span class="stat-card-value" id="stat-deaths">—</span>
+                        </div>
+                    </div>
+
+                    <div class="panel-section-title">Per-species breakdown</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-table"></i>
+                        Per-species table / charts go here.<br>
+                        Wire up via <code style="font-size: 11px; color: #58a6ff">EcosimUI.setStep()</code> or direct
+                        DOM updates.
+                    </div>
+
+                    <div class="panel-section-title">Time series</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-activity"></i>
+                        Population-over-time chart goes here.
+                    </div>
+
+                    <div class="panel-section-title">Biome coverage</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-pie-chart-fill"></i>
+                        Biome distribution chart goes here.
+                    </div>
+
+                </div>
+            </div>
+
+            <div id="panel-animals" class="offcanvas offcanvas-end sim-panel" tabIndex=-1
+                aria-labelledby="panel-animals-title">
+                <div class="offcanvas-header">
+                    <h5 class="offcanvas-title" id="panel-animals-title">
+                        <i class="bi bi-bug-fill" style="color: #56d364"></i>
+                        Animal Preferences
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></i>
+                </div>
+                <div class="offcanvas-body">
+
+                    <div class="panel-section-title">Select species</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-list-ul"></i>
+                        Species selector goes here.
+                    </div>
+
+                    <div class="panel-section-title">Movement &amp; behavior</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-arrows-move"></i>
+                        Speed, wander range, flee radius, etc.
+                    </div>
+
+                    <div class="panel-section-title">Diet &amp; energy</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-lightning-fill"></i>
+                        Hunger rate, food preferences, energy thresholds.
+                    </div>
+
+                    <div class="panel-section-title">Reproduction</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-heart-fill"></i>
+                        Gestation time, litter size, maturity age.
+                    </div>
+
+                    <div class="panel-section-title">Biome affinities</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-globe2"></i>
+                        Per-biome preference sliders.
+                    </div>
+
+                </div>
+            </div>
+
+            <div id="panel-biomes" class="offcanvas offcanvas-end sim-panel" tabIndex=-1
+                aria-labelledby="panel-biomes-title">
+                <div class="offcanvas-header">
+                    <h5 class="offcanvas-title" id="panel-biomes-title">
+                        <i class="bi bi-globe2" style="color: #f0883e;"></i>
+                        Biome Editor
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+                </div>
+                <div class="offcanvas-body">
+
+                    <div class="panel-section-title">Defined biomes</div>
+                    <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px;">
+                        <!-- {BIOMES.map(b => (
+                        <div key={b.name} class="biome-chip">
+                            <span class="biome-swatch" style={{ background: b.color }}></i>
+                            <span style={{ flex: 1 }}>{b.name}</span>
+                            <span style={{ fontSize: 11, color: '#4d5566' }}>edit →</span>
+                        </div>
+                        ))} -->
+                    </div>
+
+                    <div class="panel-section-title">Biome properties</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-sliders2"></i>
+                        Temperature, humidity, food density,<br>resource regeneration rate, etc.
+                    </div>
+
+                    <div class="panel-section-title">Map generation</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-grid-3x3-gap-fill"></i>
+                        Noise settings, seed, regenerate map.
+                    </div>
+
+                </div>
+            </div>
+
+            <div id="panel-settings" class="offcanvas offcanvas-end sim-panel" tabIndex="-1"
+                aria-labelledby="panel-settings-title">
+                <div class="offcanvas-header">
+                    <h5 class="offcanvas-title" id="panel-settings-title">
+                        <i class="bi bi-gear-fill" style="color: #8b949e"></i>
+                        General Settings
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+                </div>
+                <div class="offcanvas-body">
+
+                    <div class="panel-section-title">Simulation</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-cpu-fill"></i>
+                        Max steps, tick rate, random seed, pause-on-extinction, etc.
+                    </div>
+
+                    <div class="panel-section-title">Display</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-display"></i>
+                        Show grid lines, animal dots, biome labels, heatmaps, etc.
+                    </div>
+
+                    <div class="panel-section-title">World size</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-bounding-box-circles"></i>
+                        Grid dimensions, hex size, wrapping mode.
+                    </div>
+
+                    <div class="panel-section-title">Save / load</div>
+                    <div class="placeholder-card">
+                        <i class="bi bi-floppy2-fill"></i>
+                        Export simulation state, load from JSON.
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+
+</body>
+
+</html>

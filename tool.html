@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hex Land Mapper</title>
+
+<style>
+body {
+    margin: 0;
+    background: #222;
+    color: white;
+    font-family: sans-serif;
+}
+
+#toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #111;
+    padding: 10px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+button {
+    padding: 8px 14px;
+    cursor: pointer;
+}
+
+#count {
+    margin-left: auto;
+}
+
+#exportBox {
+    width: 100%;
+    height: 250px;
+    display: none;
+    background: #111;
+    color: #0f0;
+    border: none;
+    padding: 10px;
+    resize: vertical;
+}
+
+#container {
+    position: relative;
+    display: inline-block;
+}
+
+#map {
+    display: block;
+    max-width: 100%;
+}
+
+#hexCanvas {
+    position: absolute;
+    inset: 0;
+}
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+    <button id="exportBtn">Export Grid</button>
+    <button id="hideExportBtn">Hide Export</button>
+
+    <div id="count"></div>
+</div>
+
+<textarea id="exportBox" readonly></textarea>
+
+<div id="container">
+    <img id="map" src="image.png">
+    <canvas id="hexCanvas"></canvas>
+</div>
+
+<script>
+
+/*
+===========================================================
+CONFIGURATION
+===========================================================
+*/
+
+const HEX_SIZE = 5; // Change this
+
+const STORAGE_KEY = "hex-land-map";
+
+let isPainting = false;
+let paintValue = false;
+let paintedThisStroke = new Set();
+
+
+/*
+===========================================================
+SETUP
+===========================================================
+*/
+
+const map = document.getElementById("map");
+const canvas = document.getElementById("hexCanvas");
+const ctx = canvas.getContext("2d");
+
+const exportBox = document.getElementById("exportBox");
+const countDisplay = document.getElementById("count");
+
+let grid = [];
+let rows = 0;
+let cols = 0;
+
+/*
+===========================================================
+HEX MATH
+===========================================================
+*/
+
+const SQRT3 = Math.sqrt(3);
+
+function hexCenter(col, row) {
+
+    const x =
+        HEX_SIZE * SQRT3 * (col + 0.5 * (row & 1));
+
+    const y =
+        HEX_SIZE * 1.5 * row;
+
+    return { x, y };
+}
+
+function drawHex(x, y) {
+
+    ctx.beginPath();
+
+    for (let i = 0; i < 6; i++) {
+
+        const angle =
+            (Math.PI / 180) * (60 * i - 30);
+
+        const px =
+            x + HEX_SIZE * Math.cos(angle);
+
+        const py =
+            y + HEX_SIZE * Math.sin(angle);
+
+        if (i === 0)
+            ctx.moveTo(px, py);
+        else
+            ctx.lineTo(px, py);
+    }
+
+    ctx.closePath();
+}
+
+function pointInHex(mx, my, cx, cy) {
+
+    return (
+        Math.hypot(mx - cx, my - cy)
+        < HEX_SIZE
+    );
+}
+
+/*
+===========================================================
+GRID STORAGE
+===========================================================
+*/
+
+function saveGrid() {
+    localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(grid)
+    );
+}
+
+function loadGrid() {
+
+    const stored =
+        localStorage.getItem(STORAGE_KEY);
+
+    if (stored) {
+        grid = JSON.parse(stored);
+    }
+}
+
+/*
+===========================================================
+DRAWING
+===========================================================
+*/
+
+function draw() {
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    let landCount = 0;
+
+    for (let row = 0; row < rows; row++) {
+
+        for (let col = 0; col < cols; col++) {
+
+            const center =
+                hexCenter(col, row);
+
+            drawHex(center.x, center.y);
+
+            if (grid[row][col]) {
+
+                landCount++;
+
+                ctx.fillStyle =
+                    "rgba(0,255,0,0.35)";
+
+                ctx.fill();
+            }
+
+            ctx.strokeStyle =
+                "rgba(255,255,255,0.35)";
+
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+    }
+
+    countDisplay.textContent =
+        `Land Hexes: ${landCount}`;
+}
+
+/*
+===========================================================
+INITIALIZE
+===========================================================
+*/
+
+function initializeGrid() {
+
+    canvas.width = map.clientWidth;
+    canvas.height = map.clientHeight;
+
+    cols =
+        Math.ceil(
+            canvas.width /
+            (HEX_SIZE * SQRT3)
+        ) + 2;
+
+    rows =
+        Math.ceil(
+            canvas.height /
+            (HEX_SIZE * 1.5)
+        ) + 2;
+
+    if (
+        grid.length !== rows
+    ) {
+
+        grid = [];
+
+        for (
+            let row = 0;
+            row < rows;
+            row++
+        ) {
+
+            const arr = [];
+
+            for (
+                let col = 0;
+                col < cols;
+                col++
+            ) {
+                arr.push(false);
+            }
+
+            grid.push(arr);
+        }
+
+        loadGrid();
+
+        if (
+            grid.length !== rows
+        ) {
+
+            grid = [];
+
+            for (
+                let row = 0;
+                row < rows;
+                row++
+            ) {
+
+                const arr = [];
+
+                for (
+                    let col = 0;
+                    col < cols;
+                    col++
+                ) {
+                    arr.push(false);
+                }
+
+                grid.push(arr);
+            }
+        }
+    }
+
+    draw();
+}
+
+/*
+===========================================================
+CLICK HANDLING
+===========================================================
+*/
+function getHexAt(mx, my) {
+
+    let bestRow = -1;
+    let bestCol = -1;
+    let bestDist = Infinity;
+
+    for (let row = 0; row < rows; row++) {
+
+        for (let col = 0; col < cols; col++) {
+
+            const center = hexCenter(col, row);
+
+            const dist = Math.hypot(
+                mx - center.x,
+                my - center.y
+            );
+
+            if (dist < bestDist) {
+
+                bestDist = dist;
+                bestRow = row;
+                bestCol = col;
+            }
+        }
+    }
+
+    return {
+        row: bestRow,
+        col: bestCol
+    };
+}
+function getNeighbors(
+    row,
+    col
+) {
+
+    const evenRow =
+        row % 2 === 0;
+
+    if (evenRow) {
+
+        return [
+            [row, col - 1],
+            [row, col + 1],
+
+            [row - 1, col - 1],
+            [row - 1, col],
+
+            [row + 1, col - 1],
+            [row + 1, col]
+        ];
+    }
+
+    return [
+        [row, col - 1],
+        [row, col + 1],
+
+        [row - 1, col],
+        [row - 1, col + 1],
+
+        [row + 1, col],
+        [row + 1, col + 1]
+    ];
+}
+function floodFill(startRow, startCol) {
+
+    const targetValue =
+        grid[startRow][startCol];
+
+    const replacementValue =
+        !targetValue;
+
+    if (targetValue === replacementValue)
+        return;
+
+    const queue = [
+        [startRow, startCol]
+    ];
+
+    const visited = new Set();
+
+    while (queue.length > 0) {
+
+        const [row, col] =
+            queue.pop();
+
+        const key =
+            `${row},${col}`;
+
+        if (visited.has(key))
+            continue;
+
+        visited.add(key);
+
+        if (
+            row < 0 ||
+            row >= rows ||
+            col < 0 ||
+            col >= cols
+        ) {
+            continue;
+        }
+
+        if (
+            grid[row][col]
+            !== targetValue
+        ) {
+            continue;
+        }
+
+        grid[row][col] =
+            replacementValue;
+
+        const neighbors =
+            getNeighbors(
+                row,
+                col
+            );
+
+        for (const neighbor
+            of neighbors) {
+
+            queue.push(
+                neighbor
+            );
+        }
+    }
+
+    // saveGrid();
+    draw();
+}
+function paintHex(row, col) {
+
+    if (row < 0 || col < 0) return;
+
+    const key = `${row},${col}`;
+
+    if (paintedThisStroke.has(key))
+        return;
+
+    paintedThisStroke.add(key);
+
+    grid[row][col] = paintValue;
+}
+canvas.addEventListener("mousedown", (event) => {
+
+    const rect =
+        canvas.getBoundingClientRect();
+
+    const mx =
+        event.clientX - rect.left;
+
+    const my =
+        event.clientY - rect.top;
+
+    const hex =
+        getHexAt(mx, my);
+
+    if (hex.row < 0) return;
+
+
+    if (event.shiftKey) {
+        if (!confirm("are you sure you want to flood fill?")) return;
+        floodFill(
+            hex.row,
+            hex.col
+        );
+
+        return;
+    }
+    isPainting = true;
+
+    paintedThisStroke.clear();
+
+    paintValue =
+        !grid[hex.row][hex.col];
+
+    paintHex(
+        hex.row,
+        hex.col
+    );
+
+    saveGrid();
+    draw();
+});
+
+canvas.addEventListener("mousemove", (event) => {
+
+    if (!isPainting) return;
+
+    const rect =
+        canvas.getBoundingClientRect();
+
+    const mx =
+        event.clientX - rect.left;
+
+    const my =
+        event.clientY - rect.top;
+
+    const hex =
+        getHexAt(mx, my);
+
+    paintHex(
+        hex.row,
+        hex.col
+    );
+
+    saveGrid();
+    draw();
+});
+window.addEventListener("mouseup", () => {
+
+    if (!isPainting)
+        return;
+
+    isPainting = false;
+
+    saveGrid();
+});
+/*
+===========================================================
+EXPORT
+===========================================================
+*/
+
+document
+.getElementById("exportBtn")
+.addEventListener(
+    "click",
+    () => {
+
+        exportBox.style.display =
+            "block";
+
+        exportBox.value =
+            JSON.stringify(
+                grid,
+                null,
+                2
+            );
+
+        navigator.clipboard
+            .writeText(
+                exportBox.value
+            );
+    }
+);
+
+document
+.getElementById("hideExportBtn")
+.addEventListener(
+    "click",
+    () => {
+        exportBox.style.display =
+            "none";
+    }
+);
+
+/*
+===========================================================
+BOOT
+===========================================================
+*/
+
+map.addEventListener(
+    "load",
+    initializeGrid
+);
+
+if (map.complete) {
+    initializeGrid();
+}
+
+window.addEventListener(
+    "resize",
+    initializeGrid
+);
+
+</script>
+</body>
+</html>
