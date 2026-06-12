@@ -12,20 +12,16 @@ const BIOMES = [
 ];
 
 const HEX_SIZE  = 5;
-const GRID_COLS = 169;
-const GRID_ROWS = 117;
 const ZOOM_MAX = 16;
 const ZOOM_MIN = 0.12;
 const CELL_ZOOM_MIN = 4;
 
-// pointy-top hex: col/row → pixel center
 function hexToPixel(col, row, size) {
   const x = size * Math.sqrt(3) * (col + 0.5 * (row & 1));
   const y = size * 1.5 * row;
   return [x, y];
 }
 
-// draw one pointy-top hex path (no fill/stroke — caller decides)
 function hexPath(ctx, cx, cy, size) {
   ctx.beginPath();
   for (let i = 0; i < 6; i++) {
@@ -37,21 +33,8 @@ function hexPath(ctx, cx, cy, size) {
   ctx.closePath();
 }
 
-function buildGrid() {
-  const cells= [];
-  for (let r = 0; r < GRID_ROWS; r++) {
-    cells[r] = [];
-    for (let c = 0; c < GRID_COLS; c++) {
-      cells[r][c] = new Cell(DEFAULT_LAND[r][c]);
-    }
-  }
-  return cells;
-}
-
 const canvas = document.getElementById("sim-canvas");
 const ctx    = canvas.getContext('2d');
-
-const cells = buildGrid();
 
 let ox = 0, oy = 0, scale = 1;
 let dragging = false, dragX = 0, dragY = 0, baseOx = 0, baseOy = 0;
@@ -62,30 +45,32 @@ function computeGridOrigin() {
     const [, maxY] = hexToPixel(GRID_COLS - 1, GRID_ROWS - 1, HEX_SIZE);
     return [maxX / 2, maxY / 2];
 }
+function screenToWorld(sx, sy) {
+    const [gox, goy] = computeGridOrigin();
+    return [
+        (sx - canvas.width  / 2 - ox) / scale + gox,
+        (sy - canvas.height / 2 - oy) / scale + goy,
+    ];
+}
 function worldToHex(wx, wy) {
-    // Fractional axial for pointy-top orientation
     const q = (Math.sqrt(3) / 3 * wx - wy / 3) / HEX_SIZE;
     const r = (2 / 3 * wy) / HEX_SIZE;
-
-    // Cube round
     let cx = q, cz = r, cy = -cx - cz;
     let rx = Math.round(cx), ry = Math.round(cy), rz = Math.round(cz);
     const dx = Math.abs(rx - cx), dy = Math.abs(ry - cy), dz = Math.abs(rz - cz);
     if      (dx > dy && dx > dz) rx = -ry - rz;
     else if (dy > dz)            ry = -rx - rz;
     else                         rz = -rx - ry;
-
-    // Axial (rx, rz) → odd-r offset
     const row = rz;
     const col = rx + Math.floor(rz / 2);
 
     if (col < 0 || col >= GRID_COLS || row < 0 || row >= GRID_ROWS) return null;
-    return { col, row };
+    return cells[row][col];
 }
 function screenToHex(sx, sy) {
     return worldToHex(...screenToWorld(sx, sy));
 }
-
+let highlightedCell = null;
 function draw() {
     canvas.width  = canvas.offsetWidth  || canvas.clientWidth;
     canvas.height = canvas.offsetHeight || canvas.clientHeight;
@@ -104,6 +89,10 @@ function draw() {
             hexPath(ctx, px, py, HEX_SIZE);
             ctx.fillStyle = cell.isLand ? "green" : "blue";
             ctx.fill();
+            if (scale > CELL_ZOOM_MIN && highlightedCell?.row == r && highlightedCell?.col == c) {
+                ctx.fillStyle = "rgba(255,255,255,0.25)"
+                ctx.fill();
+            }
             ctx.strokeStyle = (scale >= CELL_ZOOM_MIN) ? 'rgba(0,0,0,0.3)' : ctx.fillStyle;
             ctx.lineWidth = (2 / scale);
             ctx.stroke();
@@ -126,11 +115,9 @@ function updateZoom() {
     if (el) el.textContent = Math.round(scale * 100) + '%';
 }
 
-// ── ResizeObserver ────────────────────────────────────────────────────────
 const ro = new ResizeObserver(draw);
 ro.observe(canvas);
 
-// ── Mouse pan ─────────────────────────────────────────────────────────────
 canvas.addEventListener('mousedown', e => {
     if (e.button !== 0) return;
     dragging = true;
@@ -145,23 +132,35 @@ window.addEventListener('mousemove', e => {
 });
 window.addEventListener('mouseup', () => { dragging = false; });
 
-// coordinate display on hover
 canvas.addEventListener('mousemove', e => {
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     const el = document.getElementById('coord-badge');
-    if (el) el.textContent = `x: ${Math.round((mx - canvas.width/2 - ox) / scale)}  y: ${Math.round((my - canvas.height/2 - oy) / scale)}`;
+    highlightedCell = screenToHex(mx,my);
+    let final = `x: ${Math.round((mx - canvas.width/2 - ox) / scale)}  y: ${Math.round((my - canvas.height/2 - oy) / scale)}`;
+    final += " | " + JSON.stringify(highlightedCell);
+    if (el) el.textContent = final;
+    draw();
 });
 
-// ── Wheel zoom ────────────────────────────────────────────────────────────
+canvas.addEventListener('click', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    highlightedCell = screenToHex(mx,my);
+    if (scale >= CELL_ZOOM_MIN) {
+        highlightedCell.clicked();
+        draw();
+    }
+});
+
 canvas.addEventListener('wheel', e => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.08 : 1/1.08;
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    // zoom toward cursor
     const oldScale = scale;
     scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale * factor));
     ox = mx - canvas.width / 2 + (ox - (mx - canvas.width / 2)) * scale / oldScale;
@@ -169,7 +168,6 @@ canvas.addEventListener('wheel', e => {
     draw();
 }, { passive: false });
 
-// ── Touch ─────────────────────────────────────────────────────────────────
 canvas.addEventListener('touchstart', e => {
     if (e.touches.length === 1) {
     dragging = true;
@@ -200,7 +198,6 @@ canvas.addEventListener('touchmove', e => {
 }, { passive: false });
 canvas.addEventListener('touchend', () => { dragging = false; });
 
-// ── Overlay buttons ───────────────────────────────────────────────────────
 document.getElementById('btn-zoom-in')?.addEventListener('click', () => {
     const rect = canvas.getBoundingClientRect();
     const oldScale = scale;
@@ -221,7 +218,6 @@ document.getElementById('btn-reset-view')?.addEventListener('click', () => {
     ox = 0; oy = 0; scale = 1; draw();
 });
 
-// ── Simulation control stubs ──────────────────────────────────────────────
 let simRunning = false;
 const playBtn = document.getElementById('btn-play');
 playBtn?.addEventListener('click', () => {
@@ -235,21 +231,17 @@ playBtn?.addEventListener('click', () => {
         playBtn.innerHTML = '<i class="bi bi-play-fill"></i> Play';
     }
     }
-    // hook: window.onSimPlay(running: boolean)
     (window).onSimPlay(simRunning);
 });
 
 document.getElementById('btn-step')?.addEventListener('click', () => {
-    // hook: window.onSimStep()
     (window).onSimStep?.();
 });
 
 document.getElementById('speed-select')?.addEventListener('change', function(o) {
-    // hook: window.onSimSpeed(multiplier: number)
     (window).onSimSpeed(Number(o.value));
 });
 
-// ── Public API (user simulation code hooks in here) ───────────────────────
 window.EcosimUI = {
     /** Force-redraw the hex canvas. Call after mutating cells. */
     redraw: draw,
