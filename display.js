@@ -11,6 +11,7 @@ const BIOMES = [
   { name: 'Mountain',      color: '#6b6b6b' },
 ];
 
+const FRAMES_PER_REDRAW = 60;
 const HEX_SIZE  = 5;
 const ZOOM_MAX = 16;
 const ZOOM_MIN = 0.12;
@@ -71,6 +72,8 @@ function screenToHex(sx, sy) {
     return worldToHex(...screenToWorld(sx, sy));
 }
 let highlightedCell = null;
+let trackedCell = null;
+
 function draw() {
     canvas.width  = canvas.offsetWidth  || canvas.clientWidth;
     canvas.height = canvas.offsetHeight || canvas.clientHeight;
@@ -97,17 +100,21 @@ function draw() {
             ctx.lineWidth = (2 / scale);
             ctx.stroke();
 
-            // if (cell.animals > 0) {
-            // const rad = Math.min(1.8 + cell.animals * 0.5, HEX_SIZE * 0.32);
-            // ctx.beginPath();
-            // ctx.arc(px, py, rad, 0, Math.PI * 2);
-            // ctx.fillStyle = 'rgba(255,255,255,0.88)';
-            // ctx.fill();
-            // }
+            if (cell.getPopulation("fox") > 0) {
+            const rad = Math.min(Math.log(cell.getPopulation("fox")) * 0.3, HEX_SIZE * 0.32);
+            ctx.beginPath();
+            ctx.arc(px, py, rad, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255,255,255,0.88)';
+            ctx.fill();
+            }
         }
     }
     ctx.restore();
     updateZoom();
+    document.getElementById("cell-info").innerHTML = trackedCell ? `
+    Biome:${trackedCell.isLand}<br>
+    ${Object.entries(trackedCell.population).map(o=>o[0] + ": " + o[1]).join("<br>")}
+    ` : ""
 }
 
 function updateZoom() {
@@ -150,6 +157,7 @@ canvas.addEventListener('click', e => {
     const my = e.clientY - rect.top;
     highlightedCell = screenToHex(mx,my);
     if (scale >= CELL_ZOOM_MIN) {
+        trackedCell = highlightedCell;
         highlightedCell.clicked();
         draw();
     }
