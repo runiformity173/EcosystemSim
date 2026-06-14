@@ -100,8 +100,8 @@ function draw() {
             ctx.lineWidth = (2 / scale);
             ctx.stroke();
 
-            if (cell.getPopulation("fox") > 0) {
-            const rad = Math.min(Math.log(cell.getPopulation("fox")) * 0.3, HEX_SIZE * 0.32);
+            if (cell.getPopulation(1) > 0) {
+            const rad = Math.min(Math.log(cell.getPopulation(1)) * 0.3, HEX_SIZE * 0.32);
             ctx.beginPath();
             ctx.arc(px, py, rad, 0, Math.PI * 2);
             ctx.fillStyle = 'rgba(255,255,255,0.88)';
@@ -113,7 +113,32 @@ function draw() {
     updateZoom();
     document.getElementById("cell-info").innerHTML = trackedCell ? `
     Biome:${trackedCell.isLand}<br>
-    ${Object.entries(trackedCell.population).map(o=>o[0] + ": " + o[1]).join("<br>")}
+    ${Object.entries(trackedCell.population).map(o=>aName[o[0]] + ": " + o[1]).join("<br>")}
+    ` : ""
+}
+function partialDraw() {
+    const [gox, goy] = computeGridOrigin();
+    ctx.save();
+    ctx.translate(canvas.width / 2 + ox, canvas.height / 2 + oy);
+    ctx.scale(scale, scale);
+    ctx.translate(-gox, -goy);
+    for (let r = 0; r < GRID_ROWS; r++) {
+        for (let c = 0; c < GRID_COLS; c++) {
+            const cell = cells[r][c];
+            if (cell.getPopulation(1) > 0) {
+                const [px, py] = hexToPixel(c, r, HEX_SIZE);
+                const rad = Math.min(Math.log(cell.getPopulation(1)) * 0.3, HEX_SIZE * 0.32);
+                ctx.beginPath();
+                ctx.arc(px, py, rad, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255,255,255,0.88)';
+                ctx.fill();
+            }
+        }
+    }
+    ctx.restore();
+    document.getElementById("cell-info").innerHTML = trackedCell ? `
+    Biome:${trackedCell.isLand}<br>
+    ${Object.entries(trackedCell.population).map(o=>aName[o[0]] + ": " + o[1]).join("<br>")}
     ` : ""
 }
 
@@ -148,7 +173,8 @@ canvas.addEventListener('mousemove', e => {
     let final = `x: ${Math.round((mx - canvas.width/2 - ox) / scale)}  y: ${Math.round((my - canvas.height/2 - oy) / scale)}`;
     final += " | " + JSON.stringify(highlightedCell);
     if (el) el.textContent = final;
-    draw();
+    if (scale >= CELL_ZOOM_MIN) draw();
+    else partialDraw();
 });
 
 canvas.addEventListener('click', e => {
@@ -156,10 +182,9 @@ canvas.addEventListener('click', e => {
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     highlightedCell = screenToHex(mx,my);
-    if (scale >= CELL_ZOOM_MIN) {
+    if (scale >= CELL_ZOOM_MIN || true) { // remove the or statement to only allow clicking up close.
         trackedCell = highlightedCell;
         highlightedCell.clicked();
-        draw();
     }
 });
 
@@ -253,6 +278,7 @@ document.getElementById('speed-select')?.addEventListener('change', function(o) 
 window.EcosimUI = {
     /** Force-redraw the hex canvas. Call after mutating cells. */
     redraw: draw,
+    partialRedraw: partialDraw,
     /** The live 2-D cell array [col][row] — mutate in place. */
     cells,
     /** Biome metadata array. */

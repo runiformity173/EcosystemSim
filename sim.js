@@ -29,13 +29,40 @@ let ANIMALS = {
     toad: {
         diet: "carnivore",
         size: 4,
-        stratum: "water"
+        stratum: "ground"
     },
+    griffon: {
+        diet: "carnivore",
+        size: 100,
+        stratum: "air"
+    },
+    dragon: {
+        diet: "carnivore",
+        size: 1000,
+        stratum: "air"
+    },
+    worm: {
+        diet: "herbivore",
+        reproductionFactor:0.5,
+        size: 1.5,
+        stratum: "underground"
+    },
+    wren: {
+        diet: "carnivore",
+        size: 2.0,
+        stratum: "air"
+    }
 };
+let aName = [];
+let aN = 0;
+let aDiet = [];
+let aSize = [];
+let aStratum = [];
+let aReproduction = [];
 const stratums = ["ground","air","water","underwater","underground","climbing"]; // plants can be perching or climbing
 const stratumMatchupPenalty = [
     [1, 2, 1.2, 2, 1.5, 1.3],
-    [1, 1.5, 1.2, 1.2, 3, 1],
+    [1, 1.5, 1.2, 1.2, 1.5, 1],
     [1, 2, 1, 1, 2, 3.5],
     [2.5, 2, 1.2, 1, Infinity, Infinity],
     [1, 3, 1.3, Infinity, 1.2, 3], // might need to make them cull themselves, swap ground and underground
@@ -43,60 +70,69 @@ const stratumMatchupPenalty = [
 ];
 const GRID_COLS = 169;
 const GRID_ROWS = 117;
-const TIME_STEP = 1;
-const ALLOWED_SIZE_STEPUP_FACTOR = 1//1.2;
-const FOOD_REQ_CONSTANT = 0.56;//0.56;
-const ENCOUNTER_RATE = 500; // if two animals are on the same acre, how often will they encounter each other per week
-const HANDLING_TIME = 0.05;
+let TIME_STEP = 1;
+const ALLOWED_SIZE_STEPUP_FACTOR = 1.0;
+const FOOD_REQ_CONSTANT = 0.2;//0.56;
 const BASE_ESCAPE_RATE = 0.75; // escape rate for equal size hunt
-const TROPHIC_LOSS = 0.3;
+const TROPHIC_LOSS = 0.1;
 
-const predationPreferences = {}
+const foodRates = []; // change to food per energy?
+const initialCosts = [];
 function calculatePredationMatchups() {
-    for (const i in ANIMALS) {
-        const predator = ANIMALS[i];
-        if (predator.diet == "herbivore") continue;
-        predationPreferences[i] = {};
+    for (let i = 0;i<aN;i++) {
+        foodRates[i] = Array.from({length:aN}).fill(0);
+        initialCosts[i] = Array.from({length:aN}).fill(0);
+        if (aDiet[i] == "herbivore") continue;
         totalWeight = 0;
-        let bestWeight = 0;
-        for (const j in ANIMALS) {
-            const prey = ANIMALS[j];
-            if (i == j || prey.size >= predator.size*ALLOWED_SIZE_STEPUP_FACTOR) continue; // prune bigger and no cannibalism.
-            const sizeRatio = (prey.size)/(predator.size*ALLOWED_SIZE_STEPUP_FACTOR);
+        for (let j = 0;j<aN;j++) {
+            if (i == j || aSize[j] >= aSize[i]*ALLOWED_SIZE_STEPUP_FACTOR) continue; // prune bigger and no cannibalism.
+            const sizeRatio = (aSize[j])/(aSize[i]*ALLOWED_SIZE_STEPUP_FACTOR);
             const cost = (
-                (predator.size+prey.size) / // hunt energy
+                (aSize[j]+aSize[i]/4) / // hunt energy
                 Math.min(1,(1-(BASE_ESCAPE_RATE-(1-sizeRatio)))) // success chance
-            ) * stratumMatchupPenalty[stratums.indexOf(predator.stratum)][stratums.indexOf(prey.stratum)];
+            ) * stratumMatchupPenalty[aStratum[i]][aStratum[j]];
             let favor = (
-                prey.size ** 3 / // benefit
+                aSize[j] ** 3 * TROPHIC_LOSS - // benefit
                 cost // cost
             );
-            if (favor == 0) favor = 0.00001; // not even worth hunting
-            predationPreferences[i][j] = favor;
+            if (favor <= 0) favor = 0; // not even worth hunting
+            foodRates[i][j] = favor;
+            initialCosts[i][j] = cost; // MAKE THIS WORK, UPDATE COST CALCULATIONS
             totalWeight += favor;
-            bestWeight = Math.max(bestWeight,favor);
         }
-        for (const j in predationPreferences[i])
-            predationPreferences[i][j] /= totalWeight;
+        if (totalWeight == 0) console.warn("No prey viable for " + aName[i] + "!");
     }
 }
-calculatePredationMatchups();
+function speciesSetup() {
+    aN = 0;
+    for (const [name,{diet, size, stratum, reproductionFactor}] of Object.entries(ANIMALS)) {
+        aName.push(name);
+        aDiet.push(diet);
+        aSize.push(size);
+        aStratum.push(stratums.indexOf(stratum));
+        if (reproductionFactor) aReproduction[aN] = reproductionFactor;
+        aN++;
+    }
+    calculatePredationMatchups();
+}
+speciesSetup();
 class Cell {
     constructor(row, col, isLand) {
         this.row = row;
         this.col = col;
         this.isLand = isLand;
-        this.population = {};
+        this.population = [];
         this.totalAnimals = 0;
         this.carryingCapacity = 10_000;
     }
     clicked() {
-        this.setPopulation("fox",10);
-        this.setPopulation("snake",2);
-        this.setPopulation("lizard",10000);
-        this.setPopulation("owl",30);
-        this.setPopulation("toad",50);
-        this.setPopulation("rabbit",10000);
+        this.setPopulation(aName.indexOf("fox"),10);
+        // this.setPopulation(aName.indexOf("snake"),2);
+        // this.setPopulation(aName.indexOf("lizard"),10000);
+        // this.setPopulation(aName.indexOf("owl"),30);
+        // this.setPopulation(aName.indexOf("toad"),50);
+        // this.setPopulation(aName.indexOf("griffon"),1);
+        this.setPopulation(aName.indexOf("rabbit"),10000);
     }
     getPopulation(animal) {
         return this.population[animal] || 0;
@@ -104,7 +140,7 @@ class Cell {
     setPopulation(animal,amount) {
         this.totalAnimals += amount - this.getPopulation(animal);
         if (amount < 1) {
-            if (animal in this.population) delete this.population[animal];
+            delete this.population[animal];
         }
         else this.population[animal] = amount;
     }
@@ -113,46 +149,45 @@ class Cell {
     }
     derivatives(animalsKey,state) { // this function needs to be heavily optimized. Probably a global struct of arrays
         const cc = this.carryingCapacity;
-        const out = Array.from({length: animalsKey.length}).fill(0);
+        const out = Array.from({length: aN}).fill(0);
         const killAmount = [];
-        for (let i = animalsKey.length-1;i>=0;i--) {
-            if (state[i] <= 0) continue;
-            const main = ANIMALS[animalsKey[i]];
-            if (main.diet == "herbivore") {
-                out[i] += TIME_STEP * main.reproductionFactor * state[i] * (1 - state[i]/cc); // could probably make a big array, struct of arrays
+        for (const i of animalsKey) {
+            if (!state[i] || state[i] <= 0) continue;
+            if (aDiet[i] == "herbivore") {
+                out[i] += TIME_STEP * aReproduction[i] * state[i] * (1 - state[i]/cc); // could probably make a big array, struct of arrays
             }
             else { // predation
                 let totalFood = 0;
-                const requiredFoodEach = FOOD_REQ_CONSTANT * main.size**(9/4) * TIME_STEP;
+                const requiredFoodEach = FOOD_REQ_CONSTANT * aSize[i]**(9/4) * TIME_STEP;
                 const requiredFood = requiredFoodEach * state[i];
-                let restTime = 0;
-                for (let j = animalsKey.length-1;j>=0;j--) {
-                    killAmount[j] = 0;
-                    if (j == i) continue; // again, prune cannibalism
-                    const prey = ANIMALS[animalsKey[j]];
-                    const processingTime = HANDLING_TIME * prey.size ** 3 * TROPHIC_LOSS / requiredFoodEach;
-                    if (animalsKey[j] in predationPreferences[animalsKey[i]]) {
-                        const pref = predationPreferences[animalsKey[i]][animalsKey[j]];
-                        restTime += TIME_STEP*processingTime*pref*state[j]*ENCOUNTER_RATE/cc / stratumMatchupPenalty[stratums.indexOf(main.stratum)][stratums.indexOf(prey.stratum)];
+                const foodQueue = new Heap(foodRates[i].map((o,i)=>[o,i]).filter(o=>o[0]>0),(a,b)=>(a[0]<b[0]));
+                const killAmount = Array.from({length:aN}).fill(0);
+                let eaten = 0;
+                let lastRate = 0;
+                let lastEaten = 0;
+                while (foodQueue.size() > 0 && totalFood <= requiredFood*(1+0.1*TIME_STEP)) {
+                    let [foodRate, j] = foodQueue.pop();
+                    if (!state[j] || state[j] <= killAmount[j]+state[i]) continue;
+                    // foodRate *= (1+killAmount[j]/state[i]);
+                    lastEaten = j;
+                    totalFood += foodRate*state[i]*(state[j]-killAmount[j]||0)/cc;
+                    lastRate = foodRate;
+                    foodRate -= initialCosts[i][j]*(killAmount[j]||0)/state[j];
+                    killAmount[j] += state[i];
+                    // foodRate /= (1+killAmount[j]/state[i]);
+                    eaten++;
+                    if (foodRate > 0) {
+                        foodQueue.push([foodRate,j]);
                     }
                 }
-                for (let j = animalsKey.length-1;j>=0;j--) {
-                    killAmount[j] = 0;
-                    if (j == i) continue; // again, prune cannibalism
-                    const prey = ANIMALS[animalsKey[j]];
-                    if (animalsKey[j] in predationPreferences[animalsKey[i]]) {
-                        const pref = predationPreferences[animalsKey[i]][animalsKey[j]];
-                        let amountEncountered = Math.min(Math.max(state[j]/2,2) * TIME_STEP, state[j] , //* predationPreferences[animalsKey[i]][animalsKey[j]]
-                            (ENCOUNTER_RATE * TIME_STEP * pref * Math.max(1,Math.log(state[i])) * state[j]/cc  / stratumMatchupPenalty[stratums.indexOf(main.stratum)][stratums.indexOf(prey.stratum)]) /
-                            (1+Math.max(0,Math.log(restTime)))
-                        );
-                        killAmount[j] = amountEncountered;
-                        totalFood += amountEncountered * prey.size ** 3 * TROPHIC_LOSS;
-                    }
+                while (totalFood > requiredFood*(1+0.1*TIME_STEP)) {
+                    totalFood -= lastRate;
+                    killAmount[lastEaten]--;
+                    console.log("took back a kill")
                 }
-                // continue;
-                for (let j = 0; j < animalsKey.length; j++) {
-                    out[j] -= killAmount[j];
+                console.log(eaten); // UH OH
+                for (const j of animalsKey) {
+                    out[j] -= killAmount[j] || 0;
                 }
                 if (totalFood < requiredFood) {
                     out[i] += (totalFood-requiredFood)/requiredFood * state[i];
@@ -160,16 +195,15 @@ class Cell {
                 else {
                     out[i] += (totalFood-requiredFood)/requiredFood * state[i];
                 }
-                
-                
             }
         }
         return out;
     }
     calculateNextPopulations() {
         if (this.totalAnimals == 0) return;
-        const animalsKey = Object.keys(this.population);
-        const currentState = Object.values(this.population);
+        const animalsKey = this.population.map((o,i)=>[o,i]).filter(o=>o[0]).map(o=>o[1]);
+        const currentState = [];
+        for (const animal of animalsKey) currentState[animal] = this.population[animal];
         const derivatives1 = this.derivatives(animalsKey,currentState);
         const state2 = arrayAdd(arrayMult(derivatives1,TIME_STEP/2),currentState);
         const derivatives2 = this.derivatives(animalsKey,state2);
@@ -178,8 +212,8 @@ class Cell {
         const state4 = arrayAdd(arrayMult(derivatives3,TIME_STEP),currentState);
         const derivatives4 = this.derivatives(animalsKey,state4);
         const finalDerivatives = arrayMult(arrayAdd(arrayAdd(arrayMult(derivatives2,2),derivatives1),arrayAdd(arrayMult(derivatives3,2),derivatives4)),1/6)
-        for (let i = 0;i<animalsKey.length;i++) {
-            this.addPopulation(animalsKey[i],roundRandom(finalDerivatives[i]*TIME_STEP));
+        for (const i of animalsKey) {
+            this.addPopulation(i,roundRandom(finalDerivatives[i]*TIME_STEP)); // finalDerivatives
         }
     }
 
@@ -210,15 +244,16 @@ function simStep() {
             const cell = cells[r][c];
             if (cell.totalAnimals == 0) continue;
             for (const [r2, c2] of shuffle(getNeighbors(r,c))) {
-                if (cells[r2][c2].isLand != cell.isLand) continue;
-                for (const animal in cell.population) {
-                    cells[r2][c2].addPopulation(animal,1);
-                    cell.addPopulation(animal,-1);
+                if (cells[r2][c2].isLand != cell.isLand || !cells[r2][c2].isLand) continue; // when adding ocean ecosystems, modify
+                for (let i = 0;i<aN;i++) {
+                    if (cell.getPopulation(i) < 1 || Math.random() > 0.2) continue;
+                    cells[r2][c2].addPopulation(i,1);
+                    cell.addPopulation(i,-1);
                 }
             }
         }
     }
-    if (updates++ % FRAMES_PER_REDRAW == 0) window.EcosimUI.redraw();
+    window.EcosimUI.partialRedraw();
     if (simRunning) requestAnimationFrame(simStep);
 }
 window.onSimStep = simStep;
