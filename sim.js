@@ -1,3 +1,10 @@
+// prey amount asymptote. combined predation power? Then each gets apportioned based on power?
+// assignes predation power based on preference
+// you then have totals for each prey, can use that to diminishing returns hunt.
+// then, distribute prey back based on amount of predation effort.
+
+// this still relies on my cost model. Maybe just do it state[i]*aSize[i] for power?
+//      if so, assign preferences based off of pure size differential. Ooooh find a curve for that
 let ANIMALS = {
     rabbit: {
         diet: "herbivore",
@@ -72,7 +79,7 @@ const GRID_COLS = 169;
 const GRID_ROWS = 117;
 let TIME_STEP = 1;
 const ALLOWED_SIZE_STEPUP_FACTOR = 1.0;
-const FOOD_REQ_CONSTANT = 0.2;//0.56;
+const FOOD_REQ_CONSTANT = 0.12;//0.56;
 const BASE_ESCAPE_RATE = 0.75; // escape rate for equal size hunt
 const TROPHIC_LOSS = 0.1;
 
@@ -88,8 +95,8 @@ function calculatePredationMatchups() {
             if (i == j || aSize[j] >= aSize[i]*ALLOWED_SIZE_STEPUP_FACTOR) continue; // prune bigger and no cannibalism.
             const sizeRatio = (aSize[j])/(aSize[i]*ALLOWED_SIZE_STEPUP_FACTOR);
             const cost = (
-                (aSize[j]+aSize[i]/4) / // hunt energy
-                Math.min(1,(1-(BASE_ESCAPE_RATE-(1-sizeRatio)))) // success chance
+                (aSize[j]) / // hunt energy
+                Math.min(1,(1-(BASE_ESCAPE_RATE-(1-sizeRatio))))
             ) * stratumMatchupPenalty[aStratum[i]][aStratum[j]];
             let favor = (
                 aSize[j] ** 3 * TROPHIC_LOSS - // benefit
@@ -131,7 +138,7 @@ class Cell {
         // this.setPopulation(aName.indexOf("lizard"),10000);
         // this.setPopulation(aName.indexOf("owl"),30);
         // this.setPopulation(aName.indexOf("toad"),50);
-        // this.setPopulation(aName.indexOf("griffon"),1);
+        this.setPopulation(aName.indexOf("tyler"),3);
         this.setPopulation(aName.indexOf("rabbit"),10000);
     }
     getPopulation(animal) {
@@ -170,9 +177,9 @@ class Cell {
                     if (!state[j] || state[j] <= killAmount[j]+state[i]) continue;
                     // foodRate *= (1+killAmount[j]/state[i]);
                     lastEaten = j;
-                    totalFood += foodRate*state[i]*(state[j]-killAmount[j]||0)/cc;
+                    totalFood += foodRate*state[i]//*(state[j]-killAmount[j]||0)/cc;
                     lastRate = foodRate;
-                    foodRate -= initialCosts[i][j]*(killAmount[j]||0)/state[j];
+                    foodRate -= initialCosts[i][j]/(state[j]-killAmount[j])*cc;
                     killAmount[j] += state[i];
                     // foodRate /= (1+killAmount[j]/state[i]);
                     eaten++;
@@ -204,14 +211,14 @@ class Cell {
         const animalsKey = this.population.map((o,i)=>[o,i]).filter(o=>o[0]).map(o=>o[1]);
         const currentState = [];
         for (const animal of animalsKey) currentState[animal] = this.population[animal];
-        const derivatives1 = this.derivatives(animalsKey,currentState);
-        const state2 = arrayAdd(arrayMult(derivatives1,TIME_STEP/2),currentState);
-        const derivatives2 = this.derivatives(animalsKey,state2);
-        const state3 = arrayAdd(arrayMult(derivatives2,TIME_STEP/2),currentState);
-        const derivatives3 = this.derivatives(animalsKey,state3);
-        const state4 = arrayAdd(arrayMult(derivatives3,TIME_STEP),currentState);
-        const derivatives4 = this.derivatives(animalsKey,state4);
-        const finalDerivatives = arrayMult(arrayAdd(arrayAdd(arrayMult(derivatives2,2),derivatives1),arrayAdd(arrayMult(derivatives3,2),derivatives4)),1/6)
+        const finalDerivatives = this.derivatives(animalsKey,currentState); // derivatives1
+        // const state2 = arrayAdd(arrayMult(derivatives1,TIME_STEP/2),currentState);
+        // const derivatives2 = this.derivatives(animalsKey,state2);
+        // const state3 = arrayAdd(arrayMult(derivatives2,TIME_STEP/2),currentState);
+        // const derivatives3 = this.derivatives(animalsKey,state3);
+        // const state4 = arrayAdd(arrayMult(derivatives3,TIME_STEP),currentState);
+        // const derivatives4 = this.derivatives(animalsKey,state4);
+        // const finalDerivatives = arrayMult(arrayAdd(arrayAdd(arrayMult(derivatives2,2),derivatives1),arrayAdd(arrayMult(derivatives3,2),derivatives4)),1/6)
         for (const i of animalsKey) {
             this.addPopulation(i,roundRandom(finalDerivatives[i]*TIME_STEP)); // finalDerivatives
         }
